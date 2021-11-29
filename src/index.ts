@@ -34,13 +34,6 @@ initWebGPU().then(device => {
 
     // INIT BUFFERS
     const sizeArray= new Int32Array([w, h]);
-    const gpuWidthHeightBuffer = device.createBuffer({
-        mappedAtCreation: true,
-        size: sizeArray.byteLength,
-        usage: GPUBufferUsage.STORAGE
-    });
-    new Int32Array(gpuWidthHeightBuffer.getMappedRange()).set(sizeArray);
-    gpuWidthHeightBuffer.unmap();
 
     const gpuInputBuffer = device.createBuffer({
         mappedAtCreation: true,
@@ -64,19 +57,12 @@ initWebGPU().then(device => {
             {
                 binding: 0,
                 visibility: GPUShaderStage.COMPUTE,
-                buffer : {
-                    type: "read-only-storage"
-                }
-            } as GPUBindGroupLayoutEntry,
-            {
-                binding: 1,
-                visibility: GPUShaderStage.COMPUTE,
                 buffer: {
                     type: "read-only-storage"
                 }
             } as GPUBindGroupLayoutEntry,
             {
-                binding: 2,
+                binding: 1,
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: {
                     type: "storage"
@@ -91,17 +77,11 @@ initWebGPU().then(device => {
             {
                 binding: 0,
                 resource: {
-                    buffer: gpuWidthHeightBuffer
-                }
-            },
-            {
-                binding: 1,
-                resource: {
                     buffer: gpuInputBuffer
                 }
             },
             {
-                binding: 2,
+                binding: 1,
                 resource: {
                     buffer: gpuResultBuffer
                 }
@@ -113,18 +93,15 @@ initWebGPU().then(device => {
     // SHADER
     const shaderModule = device.createShaderModule({
         code: `
-            [[block]] struct Size {
-                size: vec2<u32>;
-            };
             [[block]] struct Image {
                 rgba: array<u32>;
             };
-            [[group(0), binding(0)]] var<storage,read> widthHeight: Size;
-            [[group(0), binding(1)]] var<storage,read> inputPixels: Image;
-            [[group(0), binding(2)]] var<storage,write> outputPixels: Image;
+            [[group(0), binding(0)]] var<storage,read> inputPixels: Image;
+            [[group(0), binding(1)]] var<storage,write> outputPixels: Image;
             [[stage(compute), workgroup_size(1)]]
             fn main ([[builtin(global_invocation_id)]] global_id: vec3<u32>) {
-                let index : u32 = global_id.x + global_id.y * widthHeight.size.x;
+                var width : u32 = 256u;
+                let index : u32 = global_id.x + global_id.y * width;
                 outputPixels.rgba[index] = inputPixels.rgba[index];
             }
         `
