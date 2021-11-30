@@ -19,8 +19,11 @@ const screenBufferByteLength = screenWidth * screenHeight * 4;
 
 //let video = document.getElementById('inputVideo') as HTMLVideoElement;
 let img = new Image();
+//img.width = dmdWidth;
+//img.height = dmdHeight;
 
 img.src = "title.webp";
+//img.src = "black.png";
 
 
 let outputCanvas = document.getElementById('outputCanvas') as HTMLCanvasElement;
@@ -118,12 +121,26 @@ initWebGPU().then(device => {
             fn main ([[builtin(global_invocation_id)]] global_id: vec3<u32>) {
                 var index : u32 = global_id.x + global_id.y *  ${dmdWidth}u;
 
+                var pixel : u32 = inputPixels.rgba[index];
+                
+                let a : u32 = (pixel >> 24u) & 255u;
+                let r : u32 = (pixel >> 16u) & 255u;
+                let g : u32 = (pixel >> 8u) & 255u;
+                let b : u32 = (pixel & 255u);
+                //pixel = a << 24u | r << 16u | g << 8u | b;
+
+                // Pixels that are too dark will be hacked to look like the background of the DMD
+                if (r < 15u && g < 15u && b < 15u ) {
+                    pixel = 4279176975u;
+                    //pixel = 4278190335u;
+                }
+
                 // First byte index of the output dot
                 var resizedPixelIndex : u32 = (global_id.x * ${dotWidth}u)  + (global_id.x * ${hSpace}u) + (global_id.y * ${screenWidth}u * (${dotHeight}u + ${vSpace}u));
 
                 for ( var row: u32 = 0u ; row < ${dotHeight}u; row = row + 1u) {
                     for ( var col: u32 = 0u ; col < ${dotWidth}u; col = col + 1u) {
-                        outputPixels.rgba[resizedPixelIndex] = inputPixels.rgba[index];
+                        outputPixels.rgba[resizedPixelIndex] = pixel;
                         resizedPixelIndex = resizedPixelIndex + 1u;
                     }
                     resizedPixelIndex = resizedPixelIndex + ${screenWidth}u - ${dotWidth}u;
@@ -147,7 +164,7 @@ initWebGPU().then(device => {
 //        const frameData = drawFrameInCanvas();
         const frameData = bufferContext.getImageData(0, 0, dmdWidth, dmdHeight);
 
-        //console.log(new Uint8Array(frameData.data));
+        console.log(new Uint8Array(frameData.data));
 
 //        gpuInputBuffer.mapAsync(GPUMapMode.READ);
         new Uint8Array(gpuInputBuffer.getMappedRange()).set(new Uint8Array(frameData.data));
@@ -168,7 +185,7 @@ initWebGPU().then(device => {
         gpuReadBuffer.mapAsync(GPUMapMode.READ).then( () => {
 
             const pixels = new Uint8Array(gpuReadBuffer.getMappedRange());
-            //console.log(pixels);
+            console.log(pixels);
             const imageData = new ImageData(new Uint8ClampedArray(pixels), screenWidth, screenHeight);
             outputContext.putImageData(imageData, 0, 0);
 
