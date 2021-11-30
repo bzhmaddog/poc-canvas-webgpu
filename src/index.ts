@@ -4,8 +4,8 @@ import * as buffer from 'buffer';
 
 const dotWidth = 4;
 const dotHeight = 4;
-const xSpace = 1;
-const ySpace = 1;
+const hSpace = 1;
+const vSpace = 1;
 
 
 const dmdWidth = 256;
@@ -116,23 +116,17 @@ initWebGPU().then(device => {
             [[group(0), binding(1)]] var<storage,write> outputPixels: Image;
             [[stage(compute), workgroup_size(1)]]
             fn main ([[builtin(global_invocation_id)]] global_id: vec3<u32>) {
-                var width : u32 = ${dmdWidth}u;
-                var index : u32 = global_id.x + global_id.y * width;
-                var pixelWidth : u32 = ${dotWidth}u;
-                var pixelHeight : u32 = ${dotHeight}u;
-                var xSpace : u32 = ${xSpace}u;
-                var ySpace : u32 = ${ySpace}u;
-                var screenWidth : u32 = ${screenWidth}u;
+                var index : u32 = global_id.x + global_id.y *  ${dmdWidth}u;
 
                 // First byte index of the output dot
-                var resizedPixelIndex : u32 = (global_id.x * pixelWidth)  + (global_id.x * xSpace) + (global_id.y * screenWidth * (pixelHeight + ySpace));
+                var resizedPixelIndex : u32 = (global_id.x * ${dotWidth}u)  + (global_id.x * ${hSpace}u) + (global_id.y * ${screenWidth}u * (${dotHeight}u + ${vSpace}u));
 
-                for ( var row: u32 = 0u ; row < pixelHeight; row = row + 1u) {
-                    for ( var col: u32 = 0u ; col < pixelWidth; col = col + 1u) {
+                for ( var row: u32 = 0u ; row < ${dotHeight}u; row = row + 1u) {
+                    for ( var col: u32 = 0u ; col < ${dotWidth}u; col = col + 1u) {
                         outputPixels.rgba[resizedPixelIndex] = inputPixels.rgba[index];
                         resizedPixelIndex = resizedPixelIndex + 1u;
                     }
-                    resizedPixelIndex = resizedPixelIndex + screenWidth - pixelWidth;
+                    resizedPixelIndex = resizedPixelIndex + ${screenWidth}u - ${dotWidth}u;
                 }
             }
         `
@@ -174,7 +168,7 @@ initWebGPU().then(device => {
         gpuReadBuffer.mapAsync(GPUMapMode.READ).then( () => {
 
             const pixels = new Uint8Array(gpuReadBuffer.getMappedRange());
-            console.log(pixels);
+            //console.log(pixels);
             const imageData = new ImageData(new Uint8ClampedArray(pixels), screenWidth, screenHeight);
             outputContext.putImageData(imageData, 0, 0);
 
@@ -188,12 +182,7 @@ initWebGPU().then(device => {
     document.getElementById('dButton').onclick = function() {
         requestAnimationFrame(draw);
     };
-
-    document.getElementById('test').onclick = function() {
-        const frameData = bufferContext.getImageData(0, 0, dmdWidth, dmdHeight);
-        outputContext.putImageData(frameData, 0, 0);
-    }
-    
+  
 
 //    requestAnimationFrame(draw);
 
