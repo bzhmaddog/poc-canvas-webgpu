@@ -1,4 +1,6 @@
 # poc-canvas-webgpu
-Just an experiment of using compute shader to alter a video played in an HTMLCanvasElement
+Just an experiment of using a WEBGPU compute shader to alter an ImageData and render it in a Canvas
 
-Ultimate goal is to make a 'pixelate' shader to simulate a Dot Matrix Display.
+Ultimate goal is to make a 'pixelate' shader to simulate a pinball Dot Matrix Display.
+
+Inspired by : https://github.com/tamani-coding/webgpu-computing-jpeg

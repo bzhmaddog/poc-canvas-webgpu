@@ -1,115 +1,63 @@
-import { decode, encode, RawImageData, BufferLike } from 'jpeg-js'
 import * as buffer from 'buffer';
 (window as any).Buffer = buffer.Buffer;
 
+let startTime = 0;
+let frames = 0;
+let lastFrames = 0;
+let minFps = 1000; // to make sure we have the correct value
+let maxFps = 0;
+
+
+// Our DMD dots will be 4x4 pixels
+// Whith a  1 pixel spacing between dots
 const dotWidth = 4;
 const dotHeight = 4;
 const hSpace = 1;
 const vSpace = 1;
 
-
+// Our DMD will be 256 x 78 dots (my initial target was a 128x39 dots DMD but it wasn't looking good so I increased the resolution)
+// Pinball DMD where usually 128x32 (WILLIAMS, BALLY, GOTLIEB, CAPCOM) or 256x64 (SEGA)
 const dmdWidth = 256;
 const dmdHeight = 78;
 const dmdBufferByteLength = dmdWidth*dmdHeight * 4;
 
+// Output canvas will be 1280x390
+// Why ? because it is the native resolution of my target display (LTA149B780F)
 const screenWidth = 1280;
 const screenHeight = 390;
 const screenBufferByteLength = screenWidth * screenHeight * 4;
 
+let img1 = new Image();
+img1.src = "game-over.webp";
 
-//let video = document.getElementById('inputVideo') as HTMLVideoElement;
-let img = new Image();
-//img.width = dmdWidth;
-//img.height = dmdHeight;
+let img2 = new Image();
+img2.src = "game-over-clouds.webp";
 
-img.src = "title.webp";
-//img.src = "black.png";
+// Create a video element
+let vid1 = document.createElement('video');
+vid1.src = "clouds.webm";
+vid1.loop = true;
 
-
+// Canvas where the DMD will be rendered
 let outputCanvas = document.getElementById('outputCanvas') as HTMLCanvasElement;
-let offscreenCanvas = document.createElement('canvas');
-let bufferContext = offscreenCanvas.getContext('2d');
 let outputContext = outputCanvas.getContext('2d');
 
+// Offscreen canvas used to composite the image and video together before generating the DMD output
+let offscreenCanvas = document.createElement('canvas');
+let bufferContext = offscreenCanvas.getContext('2d');
 
+// 256x78
 offscreenCanvas.width = dmdWidth;
 offscreenCanvas.height = dmdHeight;
 
-
-function drawFrameInCanvas() {
-    //bufferContext.drawImage(video, 0, 0, w, h);
-    bufferContext.drawImage(img, 0, 0, dmdWidth, dmdHeight);
-    //let frameImageData = bufferContext.getImageData(0, 0, w, h);
-//     return frameImageData;
-
-    requestAnimationFrame(drawFrameInCanvas);
-}
-
-requestAnimationFrame(drawFrameInCanvas);
-
-//requestAnimationFrame(draw);
+const fpsBox = document.getElementById('fpsBox');
 
 initWebGPU().then(device => {
 //    console.log(device);
 
-
-    // INIT BUFFERS
-    const gpuInputBuffer = device.createBuffer({
-        mappedAtCreation: true,
-        size: dmdBufferByteLength,
-        usage: GPUBufferUsage.STORAGE
-    });
-
-    const gpuResultBuffer = device.createBuffer({
-        size: screenBufferByteLength,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-    });
-
-    const gpuReadBuffer = device.createBuffer({
-        size: screenBufferByteLength,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-    });
-
-    // BINDING GROUP LAYOUT
-    const bindGroupLayout = device.createBindGroupLayout({
-        entries: [
-            {
-                binding: 0,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: {
-                    type: "read-only-storage"
-                }
-            } as GPUBindGroupLayoutEntry,
-            {
-                binding: 1,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: {
-                    type: "storage"
-                }
-            } as GPUBindGroupLayoutEntry
-        ]
-    });
-
-    const bindGroup = device.createBindGroup({
-        layout: bindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: gpuInputBuffer
-                }
-            },
-            {
-                binding: 1,
-                resource: {
-                    buffer: gpuResultBuffer
-                }
-            }
-        ]
-    });
-
-
-    // SHADER
+    /**
+     * The actual shader
+     */
     const shaderModule = device.createShaderModule({
         code: `
             [[block]] struct Image {
@@ -149,6 +97,133 @@ initWebGPU().then(device => {
         `
     });
 
+
+    /**
+     * Main render method
+     */
+    function drawFrame() {
+
+        bufferContext.drawImage(vid1, 0, 0, dmdWidth, dmdHeight);
+        bufferContext.drawImage(img2, 0, 0, dmdWidth, dmdHeight);
+        bufferContext.drawImage(img1, 0, 0, dmdWidth, dmdHeight);
+
+        // Grab composited image
+        const frameData = bufferContext.getImageData(0, 0, dmdWidth, dmdHeight);
+
+        // Render DMD frame
+        renderFrameWidthShader(frameData, device, shaderModule).then( imageData => {
+            // put image data into output canvas
+            outputContext.putImageData(imageData, 0, 0);
+
+            renderFPS();
+
+            // Request next frame
+            requestAnimationFrame(drawFrame);
+        });
+    }
+
+
+    function renderFPS() {
+		// calculate FPS rate
+		var now = new Date().getTime();
+		var dt = now - startTime;
+		var df = frames - lastFrames;
+
+		startTime = now;
+		lastFrames = frames;
+
+		var fps = Math.round((df * 1000) / dt);
+
+        if (frames > 60) {
+            minFps = Math.min(minFps, fps);
+        } else {
+            minFps = fps;
+        }
+
+        maxFps = Math.max(maxFps, fps);
+
+		frames++;
+
+		fpsBox.innerHTML = `Min = ${minFps} / Max = ${maxFps} / current = ${fps}`;
+	}
+
+    // Start rendering on click
+    document.getElementById('dButton').onclick = function() {
+         // Start video play
+        vid1.play();
+
+        // Start animation
+        requestAnimationFrame(drawFrame);
+    };
+
+
+
+
+});
+
+/**
+ * Not the way I think Is should work but for now
+ * I don't understand why we have to recreate the buffers and layouts each frame
+ * @param imageData Image data to be rendered
+ * @param device 
+ * @param shaderModule 
+ * @returns 
+ */
+async function renderFrameWidthShader(imageData: ImageData, device: GPUDevice, shaderModule: GPUShaderModule): Promise<ImageData> {
+
+    const gpuInputBuffer = device.createBuffer({
+        mappedAtCreation: true,
+        size: dmdBufferByteLength,
+        usage: GPUBufferUsage.STORAGE
+    });
+
+    const gpuTempBuffer = device.createBuffer({
+        size: screenBufferByteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+    });
+
+    const gpuOutputBuffer = device.createBuffer({
+        size: screenBufferByteLength,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    });
+
+    const bindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: {
+                    type: "read-only-storage"
+                }
+            } as GPUBindGroupLayoutEntry,
+            {
+                binding: 1,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: {
+                    type: "storage"
+                }
+            } as GPUBindGroupLayoutEntry
+        ]
+    });
+
+    const bindGroup = device.createBindGroup({
+        layout: bindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: gpuInputBuffer
+                }
+            },
+            {
+                binding: 1,
+                resource: {
+                    buffer: gpuTempBuffer
+                }
+            }
+        ]
+    });
+
     const computePipeline = device.createComputePipeline({
         layout: device.createPipelineLayout({
             bindGroupLayouts: [bindGroupLayout]
@@ -159,18 +234,12 @@ initWebGPU().then(device => {
         }
     });
 
+    return new Promise( resolve => {
 
-    function draw() {
-//        const frameData = drawFrameInCanvas();
-        const frameData = bufferContext.getImageData(0, 0, dmdWidth, dmdHeight);
-
-        console.log(new Uint8Array(frameData.data));
-
-//        gpuInputBuffer.mapAsync(GPUMapMode.READ);
-        new Uint8Array(gpuInputBuffer.getMappedRange()).set(new Uint8Array(frameData.data));
+        // Put original image data in the input buffer (257x78)
+        new Uint8Array(gpuInputBuffer.getMappedRange()).set(new Uint8Array(imageData.data));
         gpuInputBuffer.unmap();
 
-        // START COMPUTE PASS
         const commandEncoder = device.createCommandEncoder();
         const passEncoder = commandEncoder.beginComputePass();
         passEncoder.setPipeline(computePipeline);
@@ -178,37 +247,29 @@ initWebGPU().then(device => {
         passEncoder.dispatch(dmdWidth, dmdHeight);
         passEncoder.endPass();
 
-        commandEncoder.copyBufferToBuffer(gpuResultBuffer, 0, gpuReadBuffer, 0, screenBufferByteLength);
+        commandEncoder.copyBufferToBuffer(gpuTempBuffer, 0, gpuOutputBuffer, 0, screenBufferByteLength);
 
         device.queue.submit([commandEncoder.finish()]);
 
-        gpuReadBuffer.mapAsync(GPUMapMode.READ).then( () => {
+        // Render DMD output
+        gpuOutputBuffer.mapAsync(GPUMapMode.READ).then( () => {
 
-            const pixels = new Uint8Array(gpuReadBuffer.getMappedRange());
-            console.log(pixels);
-            const imageData = new ImageData(new Uint8ClampedArray(pixels), screenWidth, screenHeight);
-            outputContext.putImageData(imageData, 0, 0);
+            // Grab data from output buffer
+            const pixelsBuffer = new Uint8Array(gpuOutputBuffer.getMappedRange());
 
-/*            gpuInputBuffer.mapAsync(GPUMapMode.READ).then( () => {
-                requestAnimationFrame(draw);
-                console.log('here');
-            });*/
+            // Generate Image data usable by a canvas
+            const imageData = new ImageData(new Uint8ClampedArray(pixelsBuffer), screenWidth, screenHeight);
+
+            // return to caller
+            resolve(imageData);
         });
-    }
+    });
+}
 
-    document.getElementById('dButton').onclick = function() {
-        requestAnimationFrame(draw);
-    };
-  
-
-//    requestAnimationFrame(draw);
-
-
-});
-
-
-
-
+/**
+ * Async method to initialize webgpu internals
+ * @returns GPUDevice
+ */
 async function initWebGPU() : Promise<GPUDevice> {
     const adapter = await navigator.gpu.requestAdapter();
     const device = await adapter.requestDevice();
